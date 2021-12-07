@@ -53,6 +53,9 @@ public without sharing class AT_RecordAutomationRealTime {
             if (automation.isEmpty()) {
               return ;
               }
+            /* if (automation.size() >= N) {    //each new assingment rule check adds around 200-255 CPU time (LIMIT 10000)
+                 skipNotCorrespondRecords(typeObject, automations2, ids); in Async(May be queue)
+            } */
             
             skipNotCorrespondRecords(typeObject, automations2, ids); //modified method from AT_AutomationReverse class, all common method should be moved to service class;
 
