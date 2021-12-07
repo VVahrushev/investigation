@@ -1,0 +1,166 @@
+public without sharing class AT_RecordAutomationRealTime {
+    private static String RECORD_AUTOMATION_REAL_TIME = 'AT_RecordAutomationRealTime';
+    public static final String RECORD_AUTOMATION_ASSIGN = 'AT_RecordAutomationReverse';
+    public static final String OWNER_ID = 'ownerId';
+    public static final AT_AutomationConstants CONSTANTS = new AT_AutomationConstants();
+
+    @InvocableMethod(label='assignRecordAutomationRealTime' description='Check real time record')
+    public static void assignRecordAutomationRealTime(List<String> ids) {
+        try {
+            Id idRecord = (Id) ids.get(0);
+            String typeObject = AT_ObjectShemaService.getSobjectName(idRecord);
+
+            Map<String, String> typeObjAndField = AT_CustomMetadataService.getFieldNamesByObjectsMap(new Set<String>{typeObject});
+
+            if(typeObjAndField.isEmpty()) {
+                return ;
+            }
+
+            String fieldEngagement = typeObjAndField.get(typeObject);
+
+            List<SObject> records = Database.query('SELECT Id, '+fieldEngagement+' FROM '+typeObject+' WHERE Id=:ids');
+
+            List<String> recordsNeedToCheck = new List<String>();
+
+            for(SObject sobj: records) {
+                if(sobj.get(fieldEngagement) == null) {   //check if Lead records don't have an engagement
+                    recordsNeedToCheck.add(sobj.Id);
+                }
+            }
+
+            if(recordsNeedToCheck.isEmpty()) {
+                return ;
+            }
+
+            if(ids.size() == 1 && isExecuteSync()) {
+                assignCommunicationPlan(recordsNeedToCheck, typeObject);       //assign engagments Synch if only one Lead invoke
+            } else {
+                assignCommunicationPlanFuture(recordsNeedToCheck, typeObject);//assign engagements Asynch if more than one Lead enter the PB
+            }
+        }  catch (Exception ex) {
+            AT_ErrorHandler.handleError(AT_ErrorHandlerService.getDetailsErrorMessage(ex), RECORD_AUTOMATION_ASSIGN, AT_ErrorHandler.TypeOfError.CRITICAL);
+        }
+    }
+
+    private static Boolean isExecuteSync() {
+        return (Limits.getLimitQueries() - Limits.getQueries()) >= 20 && (Limits.getLimitCpuTime() - Limits.getCpuTime()) >= 500;  //Method from Reverse class, can be move to services
+    }
+
+    public static void assignCommunicationPlan(List<String> ids, String typeObject) {
+        try { 
+            Map<String, Automation__c> automations = AT_AutomationManager.getActiveRealTimeAutomationsByObjectType(typeObject, true); //new method in AT_AutomationManager to get all active realTime automations
+            
+            if (automation.isEmpty()) {
+              return ;
+              }
+            
+            skipNotCorrespondRecords(typeObject, automations2, ids); //modified method from AT_AutomationReverse class, all common method should be moved to service class;
+
+        } catch (Exception ex) {
+            AT_ErrorHandler.handleError(AT_ErrorHandlerService.getDetailsErrorMessage(ex), RECORD_AUTOMATION_REVERSE, AT_ErrorHandler.TypeOfError.CRITICAL);
+        }
+    }
+
+    @Future
+    public static void assignCommunicationPlanFuture(List<String> ids, String typeObject) {
+        assignCommunicationPlan(ids, typeObject);
+    }
+    
+    public static void skipNotCorrespondRecords (String typeObject, Map<String, Automation__c> automations, List<String> ids){
+        Map<String, AT_WrapperManager.AutomationWrapper> automationWrappers  = new Map<String, AT_WrapperManager.AutomationWrapper>();
+        Set<String> fieldApiNameForQuery = new Set<String>();
+        Map<String, Set<String>> memberIdsByAutomation = new Map<String, Set<String>>();
+        Map<String, String> queueIdByName = new Map<String, String>();
+
+        for(String idAutomation : automations.keySet()) {
+            AT_WrapperManager.AutomationWrapper automationWrapper = new AT_WrapperManager.AutomationWrapper(automations.get(idAutomation));
+
+            for(AT_WrapperManager.FilterOption filterOption: automationWrapper.filterWrapper.filterOptions) {
+                if(filterOption.filterCondition.referenceFieldName.equals(CONSTANTS.CURRENT_OBJECT)) {
+                    fieldApiNameForQuery.add(filterOption.filterCondition.fieldName.toLowerCase());
+                } else {
+                    String fieldReference = filterOption.filterCondition.referenceFieldName.contains(AT_Constants.UNDERLINE_C) ?
+                            filterOption.filterCondition.referenceFieldName.replace(AT_Constants.UNDERLINE_C, AT_Constants.UNDERLINE_R) :
+                            filterOption.filterCondition.referenceFieldName;
+                    fieldApiNameForQuery.add((fieldReference+'.'+filterOption.filterCondition.fieldName).toLowerCase());
+                }
+            }
+            queueIdByName.putAll(getQueueIdByName(automationWrapper));
+
+            Set<String> memberIds = getAutomationMembers(automationWrapper);
+
+            if(!memberIds.isEmpty()) {
+                memberIdsByAutomation.put(idAutomation, memberIds);
+            }
+
+            automationWrappers.put(idAutomation,automationWrapper);
+        }
+
+        List<SObject> sObjects = Database.query(generateQueryForAutomation(fieldApiNameForQuery, typeObject));
+
+        Map<String, Set<String>> engagementById = checkActualConditionRecords2(sObjects, queueIdByName, memberIdsByAutomation, typeObject, automationWrappers); //modified method from AT_AutomationReverse class, all common method should be moved to service class;
+
+        AT_ActionsWithEngagementsService.addJobs(); //method from At_ActionsWithEngagementService 
+    }
+    
+     private static Map<String, Set<String>> checkActualConditionRecords2(List<SObject> sObjects, Map<String, String> queueIdByName, 
+            Map<String, Set<String>> memberIdsByAutomation , String typeObject, Map<String, AT_WrapperManager.AutomationWrapper> automationWrappers) {
+        Map<String, Set<String>> engagementByIds = new Map<String, Set<String>>();
+
+        for(String idAutomation: automationWrappers.keySet()) {
+            Set<String> idRecords = new Set<String>();
+
+            for(SObject sobj: sObjects) {
+
+                    if(isChangeOwnerRecord(automationWrappers.get(idAutomation), queueIdByName , memberIdsByAutomation, String.valueOf(sobj.get(OWNER_ID)))) {
+                        idRecords.add(sobj.Id);
+                    }
+
+                    AT_WrapperManager.FilterWrapper filterWrapper = automationWrappers.get(idAutomation).filterWrapper;
+                    String comparisonSequence = filterWrapper.comparisonSequence;
+                    Map<Integer, Boolean> conditionsByNumber = new Map<Integer, Boolean>();
+
+                    Map<String,Schema.SObjectField> objectTypeFields = AT_ObjectSchemaService.getInstance().getObjectFieldMap(typeObject);
+
+                    for(AT_WrapperManager.FilterOption filterOption: filterWrapper.filterOptions) {
+                        DisplayType typeField;
+                        SObject recordCompare;
+
+                        if(filterOption.filterCondition.referenceFieldName.equals(CONSTANTS.CURRENT_OBJECT)) {
+                            typeField = objectTypeFields.get(filterOption.filterCondition.fieldName).getDescribe().getType();
+                            recordCompare = sobj;
+                        } else {
+                            String fieldReferenceForType;
+                            String fieldReferenceForRelatedObj;
+
+                            if(filterOption.filterCondition.referenceFieldName.contains(AT_Constants.UNDERLINE_C)) {
+                                fieldReferenceForType = filterOption.filterCondition.referenceFieldName;
+                                fieldReferenceForRelatedObj = filterOption.filterCondition.referenceFieldName.replace(AT_Constants.UNDERLINE_C, AT_Constants.UNDERLINE_R);
+                            } else {
+                                fieldReferenceForType = filterOption.filterCondition.referenceFieldName+'Id';
+                                fieldReferenceForRelatedObj = filterOption.filterCondition.referenceFieldName;
+                            }
+
+                            SobjectType sobjectType = AT_ObjectSchemaService.getInstance().getReferenceToList(typeObject, fieldReferenceForType);
+                            String objectTypeToCheck = sobjectType.getDescribe().getName();
+                            Map<String,Schema.SObjectField> objectTypeRelatedFields = AT_ObjectSchemaService.getInstance().getObjectFieldMap(objectTypeToCheck);
+                            typeField = objectTypeRelatedFields.get(filterOption.filterCondition.fieldName).getDescribe().getType();
+                            recordCompare = (SObject)sobj.getSObject(fieldReferenceForRelatedObj);
+                        }
+
+                        conditionsByNumber.put(filterOption.id ,getConditionResult(filterOption, recordCompare, typeField));
+                    }
+
+                    if(getResultComparisonSequence(comparisonSequence, conditionsByNumber)) {
+                        idRecords.add(sobj.Id);
+                    }
+
+            }
+
+            if(!idRecords.isEmpty()) {
+                engagementByIds.put(automationWrappers.get(idAutomation).engagement, idRecords);
+                return engagementByIds;
+            }
+        }
+        return null;
+    }
