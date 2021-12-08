@@ -7,6 +7,11 @@ public without sharing class AT_RecordAutomationRealTime {
     @InvocableMethod(label='assignRecordAutomationRealTime' description='Check real time record')
     public static void assignRecordAutomationRealTime(List<String> ids) {
         try {
+        
+            if (ids.size() > 1) {
+                return ;
+            }
+        
             Id idRecord = (Id) ids.get(0);
             String typeObject = AT_ObjectShemaService.getSobjectName(idRecord);
 
@@ -31,42 +36,29 @@ public without sharing class AT_RecordAutomationRealTime {
             if(recordsNeedToCheck.isEmpty()) {
                 return ;
             }
-
-            if(ids.size() == 1 && isExecuteSync()) {
-                assignCommunicationPlan(recordsNeedToCheck, typeObject);       //assign engagments Synch if only one Lead invoke
-            } else {
-                assignCommunicationPlanFuture(recordsNeedToCheck, typeObject);//assign engagements Asynch if more than one Lead enter the PB
-            }
+                assignCommunicationPlan(recordsNeedToCheck, typeObject);
+                
         }  catch (Exception ex) {
             AT_ErrorHandler.handleError(AT_ErrorHandlerService.getDetailsErrorMessage(ex), RECORD_AUTOMATION_ASSIGN, AT_ErrorHandler.TypeOfError.CRITICAL);
         }
-    }
-
-    private static Boolean isExecuteSync() {
-        return (Limits.getLimitQueries() - Limits.getQueries()) >= 20 && (Limits.getLimitCpuTime() - Limits.getCpuTime()) >= 500;  //Method from Reverse class, can be move to services
     }
 
     public static void assignCommunicationPlan(List<String> ids, String typeObject) {
         try { 
             Map<String, Automation__c> automations = AT_AutomationManager.getActiveRealTimeAutomationsByObjectType(typeObject, true); //new method in AT_AutomationManager to get all active realTime automations
             
-            if (automation.isEmpty()) {
+            if (automations.isEmpty()) {
               return ;
               }
-            /* if (automation.size() >= N) {    //each new assingment rule check adds around 200-255 CPU time (LIMIT 10000)
-                 skipNotCorrespondRecords(typeObject, automations2, ids); in Async(May be queue)
-            } */
-            
-            skipNotCorrespondRecords(typeObject, automations2, ids); //modified method from AT_AutomationReverse class, all common method should be moved to service class;
-
+              
+            if (isSystemAvailable(automations.size())) {    //each new assingment rule check adds around 200-255 CPU time (LIMIT 10000)
+                 skipNotCorrespondRecords(typeObject, automations2, ids); //Sync
+            } else { //Async
+                skipNotCorrespondRecords(typeObject, automations2, ids); //modified method from AT_AutomationReverse class, all common method should be moved to service class;
+            }
         } catch (Exception ex) {
             AT_ErrorHandler.handleError(AT_ErrorHandlerService.getDetailsErrorMessage(ex), RECORD_AUTOMATION_REVERSE, AT_ErrorHandler.TypeOfError.CRITICAL);
         }
-    }
-
-    @Future
-    public static void assignCommunicationPlanFuture(List<String> ids, String typeObject) {
-        assignCommunicationPlan(ids, typeObject);
     }
     
     public static void skipNotCorrespondRecords (String typeObject, Map<String, Automation__c> automations, List<String> ids){
