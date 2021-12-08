@@ -56,6 +56,7 @@ public without sharing class AT_RecordAutomationRealTime {
                  skipNotCorrespondRecords(typeObject, automations2, ids); //Sync
             } else { //Async
                 skipNotCorrespondRecords(typeObject, automations2, ids); //modified method from AT_AutomationReverse class, all common method should be moved to service class;
+                //add ids to Platform cache
             }
         } catch (Exception ex) {
             AT_ErrorHandler.handleError(AT_ErrorHandlerService.getDetailsErrorMessage(ex), RECORD_AUTOMATION_REVERSE, AT_ErrorHandler.TypeOfError.CRITICAL);
@@ -95,6 +96,10 @@ public without sharing class AT_RecordAutomationRealTime {
         List<SObject> sObjects = Database.query(generateQueryForAutomation(fieldApiNameForQuery, typeObject));
 
         Map<String, Set<String>> engagementById = checkActualConditionRecords2(sObjects, queueIdByName, memberIdsByAutomation, typeObject, automationWrappers); //modified method from AT_AutomationReverse class, all common method should be moved to service class;
+        
+        if (//Async) {
+            //delete ids from Platform Cache
+        }
 
         AT_ActionsWithEngagementsService.addJobs(); //method from At_ActionsWithEngagementService 
     }
