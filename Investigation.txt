@@ -1,6 +1,6 @@
 public without sharing class AT_RecordAutomationRealTime {
     private static String RECORD_AUTOMATION_REAL_TIME = 'AT_RecordAutomationRealTime';
-    public static final String RECORD_AUTOMATION_ASSIGN = 'AT_RecordAutomationReverse';
+    public static final String RECORD_AUTOMATION_ASSIGN = 'AT_RecordAutomationAssign';
     public static final String OWNER_ID = 'ownerId';
     public static final AT_AutomationConstants CONSTANTS = new AT_AutomationConstants();
 
@@ -36,7 +36,8 @@ public without sharing class AT_RecordAutomationRealTime {
             if(recordsNeedToCheck.isEmpty()) {
                 return ;
             }
-                assignCommunicationPlan(recordsNeedToCheck, typeObject);
+            
+            assignCommunicationPlan(recordsNeedToCheck, typeObject);
                 
         }  catch (Exception ex) {
             AT_ErrorHandler.handleError(AT_ErrorHandlerService.getDetailsErrorMessage(ex), RECORD_AUTOMATION_ASSIGN, AT_ErrorHandler.TypeOfError.CRITICAL);
@@ -51,7 +52,7 @@ public without sharing class AT_RecordAutomationRealTime {
               return ;
               }
               
-            if (isSystemAvailable(automations.size())) {    //each new assingment rule check adds around 200-255 CPU time (LIMIT 10000)
+            if (isSystemAvailable(automations.size())) {    //each new assingment rule check adds around 150-200 CPU time (LIMIT 10000)
                  skipNotCorrespondRecords(typeObject, automations2, ids); //Sync
             } else { //Async
                 skipNotCorrespondRecords(typeObject, automations2, ids); //modified method from AT_AutomationReverse class, all common method should be moved to service class;
